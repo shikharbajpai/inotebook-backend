@@ -41,11 +41,17 @@ const loginValidationRules = () => [
         .isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
 ];
 
+// const generateToken = (user) => jwt.sign(
+//     { id: user._id, name: user.name, email: user.email },
+//     process.env.JWT_SECRET,
+//     { expiresIn: process.env.JWT_EXPIRY || '60s' }
+// );
+
 // Function to generate JWT token
-const generateToken = (user) => jwt.sign(
-    { id: user._id, name: user.name, email: user.email },
+const generateToken = (user, expiresIn = '1h') => jwt.sign(
+    { id: user._id, email: user.email },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRY || '60s' }
+    { expiresIn }
 );
 
 // Create a user using: POST /api/auth/createuser
@@ -152,5 +158,86 @@ router.post('/getuser', fetchuser, async (req, res) => {
         });
     }
 });
+
+// Forgot Password: POST /api/auth/forgotpassword
+router.post('/forgotpassword', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) {
+            logger.error('User not found');
+            return res.status(404).json({
+                statusCode: 404,
+                status: "failure",
+                data: {},
+                error: {
+                    code: 404,
+                    name: "Not Found",
+                    message: "User not found"
+                }
+            });
+        }
+
+        const resetToken = generateToken(user, '5m');
+
+        // Here, you would normally send this token to the user via email
+        // For simplicity, we're returning it in the response
+        res.status(200).json({
+            statusCode: 200,
+            status: "success",
+            data: { records: { resetToken } }
+        });
+
+        logger.info('Password reset token generated successfully');
+    } catch (error) {
+        logger.error('Error in forgot password:', error.message);
+        res.status(500).json({
+            statusCode: 500,
+            status: "failure",
+            data: { records: { errors: [{ msg: 'Internal server error' }] } }
+        });
+    }
+});
+
+// Reset Password: POST /api/auth/resetpassword
+router.post('/resetpassword', fetchuser, async (req, res) => {
+    const { newPassword } = req.body;
+
+    try {
+        const user = await User.findById(req.userId);
+
+        if (!user) {
+            return res.status(404).json({
+                statusCode: 404,
+                status: "failure",
+                data: {},
+                error: {
+                    code: 404,
+                    name: "Not Found",
+                    message: "User not found"
+                }
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, await bcrypt.genSalt(10));
+        user.password = hashedPassword;
+        await user.save();
+
+        res.status(200).json({
+            statusCode: 200,
+            status: "success",
+            data: { records: { message: 'Password reset successfully' } }
+        });
+        logger.info('Password reset successfully');
+    } catch (error) {
+        logger.error('Error in reset password:', error.message);
+        res.status(400).json({
+            statusCode: 400,
+            status: "failure",
+            data: { records: { errors: [{ msg: 'Invalid or expired token' }] } }
+        });
+    }
+});
+
 
 module.exports = router;
